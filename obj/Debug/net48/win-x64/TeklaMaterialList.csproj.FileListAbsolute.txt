@@ -39,3 +39,4 @@ C:\RN\tekmatlist\bin\Debug\net48\win-x64\Irony.dll
 C:\RN\tekmatlist\bin\Debug\net48\win-x64\SixLabors.Fonts.dll
 C:\RN\tekmatlist\bin\Debug\net48\win-x64\System.IO.Packaging.dll
 C:\RN\tekmatlist\bin\Debug\net48\win-x64\XLParser.dll
+C:\RN\tekmatlist\obj\Debug\net48\win-x64\TeklaMaterialList.sourcelink.json

@@ -18,6 +18,7 @@ namespace TeklaMaterialList
         private const string TEMPLATE_FILE = "TEKİRDAG MALZEME LİSTESİ.xlsx";
         private const double STANDARD_LENGTH = 12.0; // Standard profile length in meters
         private Dictionary<string, double> _weightCache; // Add weight cache
+        private HashSet<double> _allBoltLengths = new HashSet<double>(); // Add this field
 
         private class PlateSize
         {
@@ -395,6 +396,12 @@ namespace TeklaMaterialList
                         UpdateProgress(90, "Exporting plates...");
                         ExportMaterialsToWorksheet(workbook, "Levhalar", plates);
 
+                        UpdateProgress(90, "Getting bolt list...");
+                        var bolts = GetBoltList();
+                        
+                        UpdateProgress(95, "Exporting bolts...");
+                        ExportBoltsToWorksheet(workbook, "Bulonlar", bolts);
+
                         UpdateProgress(95, "Saving Excel file...");
                         workbook.SaveAs(filePath);
                         MessageBox.Show("Malzeme listesi başarıyla oluşturuldu!");
@@ -690,6 +697,222 @@ namespace TeklaMaterialList
                 MessageBox.Show($"Error getting profile weight: {ex.Message}");
                 return 0.0;
             }
+        }
+
+        private class BoltItem
+        {
+            public string StandardName { get; set; }
+            public string Size { get; set; }
+            public string Length { get; set; }
+            public int Quantity { get; set; }
+            public string Assembly { get; set; }
+        }
+
+        private string GetBoltKey(string standard, string size, double length, string assembly)
+        {
+            // Find the next available longer bolt length that's within 5mm
+            var nextLongerLength = _allBoltLengths
+                .Where(l => l > length && l <= length + 5)
+                .OrderBy(l => l)
+                .FirstOrDefault();
+
+            // If we found a longer bolt within 5mm, use that length instead
+            var finalLength = nextLongerLength > 0 ? nextLongerLength : length;
+            
+            return $"{standard}-{size}-{finalLength}-{assembly}";
+        }
+
+        private List<BoltItem> GetBoltList()
+        {
+            var boltGroups = new Dictionary<string, BoltItem>();
+            var debugInfo = new List<string>();
+            _allBoltLengths.Clear();
+            
+            try
+            {
+                // First pass: collect all bolt lengths
+                var selector = _model.GetModelObjectSelector();
+                var allObjects = selector.GetAllObjects();
+                while (allObjects.MoveNext())
+                {
+                    if (allObjects.Current is BoltGroup boltGroup)
+                    {
+                        double length = 0.0;
+                        if (boltGroup.GetReportProperty("LENGTH", ref length) || 
+                            boltGroup.GetReportProperty("BOLT_LENGTH", ref length))
+                        {
+                            _allBoltLengths.Add(Math.Round(length)); // Round to nearest mm
+                        }
+                    }
+                }
+
+                // Sort lengths for easier reference - fixed OrderBy method name
+                var sortedLengths = _allBoltLengths.OrderBy(l => l).ToList();
+                _allBoltLengths = new HashSet<double>(sortedLengths);
+
+                // Second pass: group bolts
+                allObjects = selector.GetAllObjects();
+                while (allObjects.MoveNext())
+                {
+                    if (allObjects.Current is BoltGroup boltGroup)
+                    {
+                        try
+                        {
+                            var bolt = boltGroup.BoltStandard;
+                            var size = boltGroup.BoltSize;
+                            double length = 0.0;
+                            int count = 0;
+
+                            if (!boltGroup.GetReportProperty("LENGTH", ref length))
+                            {
+                                boltGroup.GetReportProperty("BOLT_LENGTH", ref length);
+                            }
+
+                            // Get bolt count
+                            foreach (var countProp in new[] { "BOLT_COUNT", "NUMBER_OF_BOLTS", "BOLT_NUMBER" })
+                            {
+                                if (boltGroup.GetReportProperty(countProp, ref count) && count > 0)
+                                    break;
+                            }
+
+                            if (count == 0)
+                            {
+                                var positions = boltGroup.BoltPositions;
+                                count = positions?.Count ?? 0;
+                            }
+                            
+                            var assembly = boltGroup.PartToBeBolted?.GetAssembly()?.AssemblyNumber.Prefix ?? "N/A";
+                            var originalLength = Math.Round(length); // Round to nearest mm
+                            var key = GetBoltKey(bolt, size.ToString(), originalLength, assembly);
+
+                            if (!boltGroups.ContainsKey(key))
+                            {
+                                var nextLength = _allBoltLengths
+                                    .Where(l => l > originalLength && l <= originalLength + 5)
+                                    .OrderBy(l => l)
+                                    .FirstOrDefault();
+
+                                var targetLength = nextLength > 0 ? nextLength : originalLength;
+                                
+                                if (nextLength > 0)
+                                {
+                                    debugInfo.Add($"Grouped {bolt} M{size}x{originalLength} -> M{size}x{targetLength}");
+                                }
+                                
+                                boltGroups[key] = new BoltItem
+                                {
+                                    StandardName = bolt,
+                                    Size = size.ToString(),
+                                    Length = targetLength.ToString(),
+                                    Assembly = assembly,
+                                    Quantity = 0
+                                };
+                            }
+
+                            boltGroups[key].Quantity += count;
+                        }
+                        catch (Exception ex)
+                        {
+                            debugInfo.Add($"Error processing bolt: {ex.Message}");
+                            continue;
+                        }
+                    }
+                }
+
+                // Show grouping decisions
+                if (debugInfo.Any())
+                {
+                    MessageBox.Show(
+                        "Bolt Grouping Info:\n" + string.Join("\n", debugInfo.Take(10)) + 
+                        (debugInfo.Count > 10 ? "\n..." : ""),
+                        "Bolt Grouping Debug"
+                    );
+                }
+
+                return boltGroups.Values
+                    .OrderBy(b => b.StandardName)
+                    .ThenBy(b => double.Parse(b.Size))
+                    .ThenBy(b => double.Parse(b.Length))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error getting bolts: {ex.Message}");
+                return new List<BoltItem>();
+            }
+        }
+
+        private void ExportBoltsToWorksheet(XLWorkbook workbook, string sheetName, List<BoltItem> bolts)
+        {
+            var worksheet = workbook.Worksheets.Add(sheetName);
+            
+            // Configure page setup
+            worksheet.PageSetup.PaperSize = XLPaperSize.A4Paper;
+            worksheet.PageSetup.FitToPages(1, 1);
+            worksheet.PageSetup.PageOrientation = XLPageOrientation.Portrait;
+
+            // Add title
+            worksheet.Cell("A1").Value = "BULON LİSTESİ";
+            worksheet.Range("A1:E1").Merge();
+            worksheet.Cell("A1").Style
+                .Font.SetBold(true)
+                .Font.SetFontSize(14)
+                .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+
+            // Add headers
+            var headers = new[] { 
+                "Standard", 
+                "Çap", 
+                "Boy",
+                "Adet",
+                "Mark"
+            };
+
+            for (int i = 0; i < headers.Length; i++)
+            {
+                var cell = worksheet.Cell(3, i + 1);
+                cell.Value = headers[i];
+                cell.Style
+                    .Font.SetBold(true)
+                    .Fill.SetBackgroundColor(XLColor.LightGray)
+                    .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+                    .Border.SetOutsideBorder(XLBorderStyleValues.Thin);
+            }
+
+            // Add data
+            int row = 4;
+            foreach (var bolt in bolts)
+            {
+                worksheet.Cell(row, 1).Value = bolt.StandardName;
+                worksheet.Cell(row, 2).Value = bolt.Size;
+                worksheet.Cell(row, 3).Value = bolt.Length;
+                worksheet.Cell(row, 4).Value = bolt.Quantity;
+                worksheet.Cell(row, 5).Value = bolt.Assembly;
+
+                // Format row
+                worksheet.Range(row, 1, row, 5).Style
+                    .Border.SetOutsideBorder(XLBorderStyleValues.Thin)
+                    .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+
+                row++;
+            }
+
+            // Add totals
+            worksheet.Cell(row, 1).Value = "TOPLAM";
+            worksheet.Cell(row, 4).FormulaA1 = $"=SUM(D4:D{row-1})";
+            
+            // Format totals row
+            worksheet.Range(row, 1, row, 5).Style
+                .Font.SetBold(true)
+                .Border.SetOutsideBorder(XLBorderStyleValues.Thin)
+                .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+
+            // Set column widths
+            worksheet.Column(1).Width = 25; // Standard
+            worksheet.Column(2).Width = 15; // Size
+            worksheet.Column(3).Width = 15; // Length
+            worksheet.Column(4).Width = 15; // Quantity
+            worksheet.Column(5).Width = 20; // Assembly Mark
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
