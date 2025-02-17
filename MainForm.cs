@@ -21,6 +21,17 @@ namespace TeklaMaterialList
         private const double STANDARD_LENGTH = 12.0; // Standard profile length in meters
         private Dictionary<string, double> _weightCache; // Add weight cache
         private HashSet<double> _allBoltLengths = new HashSet<double>(); // Add this field
+        private CheckBox chkSelectedOnly; // Add this field
+
+        // Add steel grades list
+        private readonly HashSet<string> STEEL_GRADES = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "S235JR", "S235J0", "S235J2",
+            "S275JR", "S275J0", "S275J2",
+            "S355JR", "S355J0", "S355J2",
+            "S420", "S420N", "S420NL",
+            "S460", "S460N", "S460NL"
+        };
 
         private class PlateSize
         {
@@ -50,7 +61,19 @@ namespace TeklaMaterialList
         {
             InitializeComponent();
             SetupGridColumns();
+            AddSelectionCheckbox();
             ConnectToTekla();
+        }
+
+        private void AddSelectionCheckbox()
+        {
+            chkSelectedOnly = new CheckBox
+            {
+                Text = "Selected Objects Only",
+                Location = new System.Drawing.Point(btnCalculate.Left - 150, btnCalculate.Top + 3),
+                AutoSize = true
+            };
+            this.Controls.Add(chkSelectedOnly);
         }
 
         private void SetupGridColumns()
@@ -328,6 +351,16 @@ namespace TeklaMaterialList
 
                 if (_model != null && _model.GetConnectionStatus())
                 {
+                    // Ask user for selection preference
+                    var result = MessageBox.Show(
+                        "Do you want to analyze selected objects only?\n\nYes = Selected objects only\nNo = All objects",
+                        "Selection Mode",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question,
+                        MessageBoxDefaultButton.Button1);
+
+                    chkSelectedOnly.Checked = (result == DialogResult.Yes);
+
                     UpdateProgress(10, "Getting material list...");
                     var materialList = GetMaterialList();
                     
@@ -482,8 +515,26 @@ namespace TeklaMaterialList
                     }
                 }
 
-                var selector = _model.GetModelObjectSelector();
-                var allObjects = selector.GetAllObjects();
+                ModelObjectEnumerator allObjects;
+                if (chkSelectedOnly.Checked)
+                {
+                    var selector = new Tekla.Structures.Model.UI.ModelObjectSelector();
+                    allObjects = selector.GetSelectedObjects();
+                    
+                    // Check if any objects are selected
+                    if (!allObjects.GetEnumerator().MoveNext())
+                    {
+                        MessageBox.Show("No objects selected. Please select objects in the model.");
+                        return new List<MaterialItem>();
+                    }
+                    // Reset enumerator
+                    allObjects = selector.GetSelectedObjects();
+                }
+                else
+                {
+                    var selector = _model.GetModelObjectSelector();
+                    allObjects = selector.GetAllObjects();
+                }
                 
                 int totalObjects = 0;
                 int processedParts = 0;
@@ -515,7 +566,9 @@ namespace TeklaMaterialList
                             }
 
                             material = part.Material.MaterialString;
-                            if (string.IsNullOrEmpty(material))
+                            // Add steel grade check
+                            if (string.IsNullOrEmpty(material) || 
+                                !STEEL_GRADES.Any(grade => material.StartsWith(grade, StringComparison.OrdinalIgnoreCase)))
                             {
                                 failedMaterial++;
                                 continue;
@@ -629,8 +682,9 @@ namespace TeklaMaterialList
                 var materials = new List<MaterialItem>();
                 foreach (var group in profileGroups)
                 {
-                    var material = group.Key.Split('-')[0];
-                    var profile = group.Key.Split('-')[1];
+                    var keyParts = group.Key.Split('-');
+                    var material = keyParts[0];
+                    var profile = keyParts[1];
 
                     // Cache the weight per meter
                     _weightCache[profile] = (group.Value.TotalWeight / group.Value.TotalLength) * 1000.0;
@@ -1114,7 +1168,8 @@ namespace TeklaMaterialList
             // If we found a longer bolt within 5mm, use that length instead
             var finalLength = nextLongerLength > 0 ? nextLongerLength : length;
             
-            return $"{standard}-{size}-{finalLength}-{assembly}";
+            // Remove assembly from key to group all same size/length bolts together
+            return $"{standard}-{size}-{finalLength}";
         }
 
         private List<BoltItem> GetBoltList()
@@ -1125,9 +1180,27 @@ namespace TeklaMaterialList
             
             try
             {
+                ModelObjectEnumerator allObjects;
+                if (chkSelectedOnly.Checked)
+                {
+                    var uiSelector = new Tekla.Structures.Model.UI.ModelObjectSelector();
+                    allObjects = uiSelector.GetSelectedObjects();
+                    
+                    // Check if any objects are selected
+                    if (!allObjects.GetEnumerator().MoveNext())
+                    {
+                        return new List<BoltItem>();
+                    }
+                    // Reset enumerator
+                    allObjects = uiSelector.GetSelectedObjects();
+                }
+                else
+                {
+                    var modelSelector = _model.GetModelObjectSelector();
+                    allObjects = modelSelector.GetAllObjects();
+                }
+
                 // First pass: collect all bolt lengths
-                var selector = _model.GetModelObjectSelector();
-                var allObjects = selector.GetAllObjects();
                 while (allObjects.MoveNext())
                 {
                     if (allObjects.Current is BoltGroup boltGroup)
@@ -1145,8 +1218,18 @@ namespace TeklaMaterialList
                 var sortedLengths = _allBoltLengths.OrderBy(l => l).ToList();
                 _allBoltLengths = new HashSet<double>(sortedLengths);
 
-                // Second pass: group bolts
-                allObjects = selector.GetAllObjects();
+                // Second pass: group bolts - get fresh enumerator
+                if (chkSelectedOnly.Checked)
+                {
+                    var uiSelector = new Tekla.Structures.Model.UI.ModelObjectSelector();
+                    allObjects = uiSelector.GetSelectedObjects();
+                }
+                else
+                {
+                    var modelSelector = _model.GetModelObjectSelector();
+                    allObjects = modelSelector.GetAllObjects();
+                }
+
                 while (allObjects.MoveNext())
                 {
                     if (allObjects.Current is BoltGroup boltGroup)
@@ -1178,7 +1261,7 @@ namespace TeklaMaterialList
                             
                             var assembly = boltGroup.PartToBeBolted?.GetAssembly()?.AssemblyNumber.Prefix ?? "N/A";
                             var originalLength = Math.Round(length); // Round to nearest mm
-                            var key = GetBoltKey(bolt, size.ToString(), originalLength, assembly);
+                            var key = GetBoltKey(bolt, size.ToString(), originalLength, "");  // Empty assembly
 
                             if (!boltGroups.ContainsKey(key))
                             {
@@ -1199,7 +1282,7 @@ namespace TeklaMaterialList
                                     StandardName = bolt,
                                     Size = size.ToString(),
                                     Length = targetLength.ToString(),
-                                    Assembly = assembly,
+                                    Assembly = "ALL", // Mark as combined
                                     Quantity = 0
                                 };
                             }

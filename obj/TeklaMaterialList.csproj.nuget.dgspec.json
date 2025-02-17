@@ -49,6 +49,10 @@
               "target": "Package",
               "version": "[0.102.1, )"
             },
+            "System.Memory": {
+              "target": "Package",
+              "version": "[4.5.4, )"
+            },
             "System.Runtime.CompilerServices.Unsafe": {
               "target": "Package",
               "version": "[6.0.0, )"
