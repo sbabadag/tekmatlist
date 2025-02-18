@@ -856,6 +856,9 @@ namespace TeklaMaterialList
                 // Add headers
                 // ...existing headers code...
 
+                double totalOriginalWeight = 0;
+                double totalCalculatedWeight = 0;
+
                 for (int i = 0; i < materials.Count; i++)
                 {
                     var row = i + 4;
@@ -863,62 +866,43 @@ namespace TeklaMaterialList
                     double thickness = double.Parse(material.Profile.Substring(2));
                     double totalWeight = material.TotalLength * _weightCache[material.Profile] / 1000.0;
 
-                    // Export plate data with simplified formulas
+                    // Get optimal size calculations
+                    var (optimalSize, plateCount) = GetOptimalPlateSize(totalWeight, thickness);
+                    double standardPlateWeight = (thickness / 1000.0) * (optimalSize.Width / 1000.0) * 
+                                            (optimalSize.Length / 1000.0) * 7850.0;
+                    double calculatedTotalWeight = plateCount * standardPlateWeight;
+
+                    // Update running totals
+                    totalOriginalWeight += totalWeight;
+                    totalCalculatedWeight += calculatedTotalWeight;
+
+                    // Export plate data with direct values instead of formulas
                     worksheet.Cell(row, 1).Value = material.Profile;
                     worksheet.Cell(row, 2).Value = Math.Round(totalWeight, 0);
-                    
-                    // Add dropdown for plate sizes
-                    var sizeCell = worksheet.Cell(row, 3);
-                    var validation = sizeCell.CreateDataValidation();
-                    validation.List($"PlateSizes!A1:A{STANDARD_PLATE_SIZES.Count}", true);
-                    
-                    // Default to optimal size
-                    var (optimalSize, _) = GetOptimalPlateSize(totalWeight, thickness);
-                    sizeCell.Value = optimalSize.ToString();
-
-                    // Add simpler formulas for Excel compatibility
-                    worksheet.Cell(row, 4).FormulaA1 = 
-                        $"=IF(C{row}=\"\",0,{thickness/1000}*" +
-                        $"VALUE(LEFT(C{row},FIND(\"x\",C{row})-1))/1000*" +
-                        $"VALUE(MID(C{row},FIND(\"x\",C{row})+1,LEN(C{row})))/1000*7850)";
-                    
-                    worksheet.Cell(row, 5).FormulaA1 = $"=ROUNDUP(B{row}/D{row},0)";
-                    worksheet.Cell(row, 6).FormulaA1 = $"=D{row}*E{row}";
-
-                    // Add hover info with simpler formula
-                    var comment = sizeCell.GetComment();
-                    comment.AddText($"Fire oranı (%) = ");
-                    comment.AddText($"=(F{row}-B{row})/B{row}*100");
+                    worksheet.Cell(row, 3).Value = optimalSize.ToString();
+                    worksheet.Cell(row, 4).Value = Math.Round(standardPlateWeight, 2);
+                    worksheet.Cell(row, 5).Value = plateCount;
+                    worksheet.Cell(row, 6).Value = Math.Round(calculatedTotalWeight, 0);
 
                     // Format numbers
                     worksheet.Cell(row, 2).Style.NumberFormat.Format = "#,##0";
                     worksheet.Cell(row, 4).Style.NumberFormat.Format = "#,##0.00";
                     worksheet.Cell(row, 5).Style.NumberFormat.Format = "#,##0";
                     worksheet.Cell(row, 6).Style.NumberFormat.Format = "#,##0";
-
-                    // Add conditional formatting for waste percentage
-                    var wasteFormula = $"=(F{row}-B{row})/B{row}";
-                    var range = worksheet.Range($"C{row}:F{row}");
-                    
-                    // Add red background for high waste
-                    range.AddConditionalFormat()
-                        .WhenIsTrue($"{wasteFormula}>0.1")
-                        .Fill.SetBackgroundColor(XLColor.LightPink);
-                    
-                    // Add green background for low waste
-                    range.AddConditionalFormat()
-                        .WhenIsTrue($"{wasteFormula}<=0.05")
-                        .Fill.SetBackgroundColor(XLColor.LightGreen);
                 }
 
-                // Add summary formulas at bottom
+                // Calculate and add totals without formulas
                 var lastRow = materials.Count + 4;
                 worksheet.Cell(lastRow + 1, 1).Value = "TOPLAM";
-                worksheet.Cell(lastRow + 1, 2).FormulaA1 = $"=SUM(B4:B{lastRow})";
-                worksheet.Cell(lastRow + 1, 6).FormulaA1 = $"=SUM(F4:F{lastRow})";
-                worksheet.Cell(lastRow + 2, 1).Value = "TOPLAM FİRE (%)";
-                worksheet.Cell(lastRow + 2, 2).FormulaA1 = 
-                    $"=ROUND((F{lastRow + 1}-B{lastRow + 1})/B{lastRow + 1}*100,2)";
+                worksheet.Cell(lastRow + 1, 2).Value = Math.Round(totalOriginalWeight, 0);
+                worksheet.Cell(lastRow + 1, 6).Value = Math.Round(totalCalculatedWeight, 0);
+
+                if (totalOriginalWeight > 0)
+                {
+                    worksheet.Cell(lastRow + 2, 1).Value = "TOPLAM FİRE (%)";
+                    worksheet.Cell(lastRow + 2, 2).Value = Math.Round(
+                        ((totalCalculatedWeight - totalOriginalWeight) / totalOriginalWeight) * 100, 2);
+                }
 
                 // Protect specific cells
                 var protectedRanges = new[] { "A:A", "B:B", "D:D", "F:F" };
@@ -936,157 +920,53 @@ namespace TeklaMaterialList
             }
             else
             {
-                // Add data
-                int totalRows = materials.Count;
+                // Handle profiles sheet
+                // ...existing headers code...
+
+                double totalLength = 0;
+                double totalWeight = 0;
+                int totalCount = 0;
+
                 for (int i = 0; i < materials.Count; i++)
                 {
-                    if (i % 10 == 0)
-                    {
-                        int progress = sheetName == "Profiller" ? 80 : 90;
-                        UpdateProgress(progress + ((i * 5) / totalRows), $"Processing {sheetName}... {i}/{totalRows}");
-                    }
-
                     var row = i + 4;
                     var material = materials[i];
 
-                    if (sheetName == "Levhalar")
-                    {
-                        // Extract plate thickness from profile (e.g., "PL10" -> 10)
-                        double thickness = double.Parse(material.Profile.Substring(2));
-                        double totalWeight = material.TotalLength * _weightCache[material.Profile] / 1000.0;
-                        
-                        // Get optimal plate size
-                        var (optimalSize, plateCount) = GetOptimalPlateSize(totalWeight, thickness);
-                        
-                        // Calculate standard plate weight for the optimal size
-                        double standardPlateWeight = (thickness / 1000.0) * (optimalSize.Width / 1000.0) * 
-                                                (optimalSize.Length / 1000.0) * 7850.0;
+                    var totalLengthInMeters = Math.Ceiling(material.TotalLength / 1000);
+                    var standardPiecesCount = (int)Math.Ceiling(totalLengthInMeters / STANDARD_LENGTH);
+                    var calculatedTotalLength = standardPiecesCount * STANDARD_LENGTH;
+                    var unitWeight = _weightCache[material.Profile];
+                    var profileTotalWeight = unitWeight * calculatedTotalLength;
 
-                        // Export plate data
-                        worksheet.Cell(row, 1).Value = material.Profile;
-                        worksheet.Cell(row, 2).Value = Math.Round(totalWeight, 0);
-                        worksheet.Cell(row, 3).Value = optimalSize.ToString();
-                        worksheet.Cell(row, 4).Value = Math.Round(standardPlateWeight, 2);
-                        worksheet.Cell(row, 5).Value = plateCount;
-                        worksheet.Cell(row, 6).Value = Math.Round(plateCount * standardPlateWeight, 0);
+                    // Update running totals
+                    totalLength += totalLengthInMeters;
+                    totalCount += standardPiecesCount;
+                    totalWeight += profileTotalWeight;
 
-                        // Replace cell comment creation with proper parameters
-                        var cell = worksheet.Cell(row, 3);
-                        var otherSizes = STANDARD_PLATE_SIZES
-                            .Where(s => s != optimalSize)
-                            .Take(3)
-                            .Select(s => 
-                            {
-                                double weight = (thickness / 1000.0) * (s.Width / 1000.0) * (s.Length / 1000.0) * 7850.0;
-                                int count = (int)Math.Ceiling(totalWeight / weight);
-                                return $"{s}: {count} adet";
-                            });
+                    // Export values
+                    worksheet.Cell(row, 1).Value = material.Profile;
+                    worksheet.Cell(row, 2).Value = totalLengthInMeters;
+                    worksheet.Cell(row, 3).Value = STANDARD_LENGTH;
+                    worksheet.Cell(row, 4).Value = standardPiecesCount;
+                    worksheet.Cell(row, 5).Value = calculatedTotalLength;
+                    worksheet.Cell(row, 6).Value = Math.Round(unitWeight, 2);
+                    worksheet.Cell(row, 7).Value = Math.Round(profileTotalWeight, 0);
 
-                        // Add comment using newer ClosedXML syntax
-                        var note = string.Join("\n", new[] { "Alternatif ölçüler:" }.Concat(otherSizes));
-                        worksheet.Cell(row, 3).WorksheetColumn().Width = 25; // Make column wider for comment
-                        worksheet.Cell(row, 3).GetComment().AddText(note);
-
-                        // Format numbers
-                        worksheet.Cell(row, 2).Style.NumberFormat.Format = "#,##0";
-                        worksheet.Cell(row, 4).Style.NumberFormat.Format = "#,##0.00";
-                        worksheet.Cell(row, 5).Style.NumberFormat.Format = "#,##0";
-                        worksheet.Cell(row, 6).Style.NumberFormat.Format = "#,##0";
-                    }
-                    else
-                    {
-                        // Use existing profile export logic
-                        var totalLengthInMeters = Math.Ceiling(material.TotalLength / 1000); // Round up to nearest meter
-                        var standardPiecesCount = Math.Ceiling(totalLengthInMeters / STANDARD_LENGTH);
-                        var calculatedTotalLength = Math.Ceiling(standardPiecesCount * STANDARD_LENGTH);
-                        var unitWeight = _weightCache[material.Profile];
-                        var totalWeight = unitWeight * (material.TotalLength / 1000.0);
-
-                        worksheet.Cell(row, 1).Value = material.Profile;
-                        worksheet.Cell(row, 2).Value = totalLengthInMeters;
-                        worksheet.Cell(row, 3).Value = STANDARD_LENGTH;
-                        worksheet.Cell(row, 4).Value = standardPiecesCount;
-                        worksheet.Cell(row, 5).Value = calculatedTotalLength;
-                        worksheet.Cell(row, 6).Value = Math.Round(unitWeight, 2);
-                        worksheet.Cell(row, 7).Value = Math.Round(totalWeight, 0); // Use actual total weight from Tekla
-
-                        // Format numbers with proper decimal separator
-                        worksheet.Cell(row, 2).Style.NumberFormat.Format = "#,##0.00";
-                        worksheet.Cell(row, 3).Style.NumberFormat.Format = "#,##0.00";
-                        worksheet.Cell(row, 5).Style.NumberFormat.Format = "#,##0.00";
-                        worksheet.Cell(row, 6).Style.NumberFormat.Format = "#,##0.00";
-                        worksheet.Cell(row, 7).Style.NumberFormat.Format = "#,##0";
-                    }
-
-                    // Format row
-                    var dataRange = worksheet.Range(row, 1, row, headers.Length);
-                    dataRange.Style
-                        .Border.SetOutsideBorder(XLBorderStyleValues.Thin)
-                        .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+                    // Format numbers
+                    worksheet.Cell(row, 2).Style.NumberFormat.Format = "#,##0.00";
+                    worksheet.Cell(row, 3).Style.NumberFormat.Format = "#,##0.00";
+                    worksheet.Cell(row, 5).Style.NumberFormat.Format = "#,##0.00";
+                    worksheet.Cell(row, 6).Style.NumberFormat.Format = "#,##0.00";
+                    worksheet.Cell(row, 7).Style.NumberFormat.Format = "#,##0";
                 }
 
-                // Format columns with appropriate widths
-                if (sheetName == "Levhalar")
-                {
-                    worksheet.Column(1).Width = 15;  // Profile
-                    worksheet.Column(2).Width = 18;  // Total Weight
-                    worksheet.Column(3).Width = 25;  // Standard Plate Size
-                    worksheet.Column(4).Width = 20;  // Standard Plate Weight
-                    worksheet.Column(5).Width = 15;  // Plate Count
-                    worksheet.Column(6).Width = 18;  // Total Weight
-                }
-                else
-                {
-                    // Use existing column widths for profiles
-                    worksheet.Column(1).Width = 25;  // Profile
-                    worksheet.Column(2).Width = 15;  // Total Length
-                    worksheet.Column(3).Width = 15;  // Standard Length
-                    worksheet.Column(4).Width = 15;  // Standard Piece Count
-                    worksheet.Column(5).Width = 15;  // Calculated Length
-                    worksheet.Column(6).Width = 18;  // Unit Weight
-                    worksheet.Column(7).Width = 18;  // Total Weight
-                }
-
-                // Add totals row
+                // Add totals directly
                 var lastRow = materials.Count + 4;
                 worksheet.Cell(lastRow + 1, 1).Value = "TOPLAM";
-                
-                // Add sum formulas for numeric columns
-                if (sheetName == "Levhalar")
-                {
-                    for (int col = 2; col <= 6; col++)
-                    {
-                        if (col != 3) // Skip the plate size column
-                        {
-                            string colLetter = worksheet.Column(col).ColumnLetter();
-                            worksheet.Cell(lastRow + 1, col).FormulaA1 = $"=SUM({colLetter}4:{colLetter}{lastRow})";
-                            worksheet.Cell(lastRow + 1, col).Style.NumberFormat.Format = 
-                                (col == 4) ? "#,##0.00" : "#,##0";
-                        }
-                    }
-                }
-                else
-                {
-                    // Use existing totals logic for profiles
-                    for (int col = 2; col <= 7; col++)
-                    {
-                        string colLetter = worksheet.Column(col).ColumnLetter();
-                        worksheet.Cell(lastRow + 1, col).FormulaA1 = $"=SUM({colLetter}4:{colLetter}{lastRow})";
-                    }
-                    
-                    // Format totals row with the same number format
-                    worksheet.Cell(lastRow + 1, 2).Style.NumberFormat.Format = "#,##0.00";
-                    worksheet.Cell(lastRow + 1, 3).Style.NumberFormat.Format = "#,##0.00";
-                    worksheet.Cell(lastRow + 1, 5).Style.NumberFormat.Format = "#,##0.00";
-                    worksheet.Cell(lastRow + 1, 6).Style.NumberFormat.Format = "#,##0.00";
-                    worksheet.Cell(lastRow + 1, 7).Style.NumberFormat.Format = "#,##0";
-                }
-
-                // Format totals row
-                worksheet.Range(lastRow + 1, 1, lastRow + 1, headers.Length).Style
-                    .Font.SetBold(true)
-                    .Border.SetOutsideBorder(XLBorderStyleValues.Thin)
-                    .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+                worksheet.Cell(lastRow + 1, 2).Value = Math.Round(totalLength, 2);
+                worksheet.Cell(lastRow + 1, 4).Value = totalCount;
+                worksheet.Cell(lastRow + 1, 5).Value = Math.Round(totalLength, 2);
+                worksheet.Cell(lastRow + 1, 7).Value = Math.Round(totalWeight, 0);
             }
 
             // Add borders to all used cells
@@ -1360,8 +1240,9 @@ namespace TeklaMaterialList
                     .Border.SetOutsideBorder(XLBorderStyleValues.Thin);
             }
 
-            // Add data - only essential fields
+            // Add data rows
             int currentRow = 4;
+            int totalBolts = 0;
             foreach (var bolt in bolts)
             {
                 worksheet.Cell(currentRow, 1).Value = bolt.StandardName;
@@ -1369,19 +1250,15 @@ namespace TeklaMaterialList
                 worksheet.Cell(currentRow, 3).Value = bolt.Length;
                 worksheet.Cell(currentRow, 4).Value = bolt.Quantity;
 
-                // Format quantity cells
-                var qtyCell = worksheet.Cell(currentRow, 4);
-                qtyCell.Style.NumberFormat.Format = "#,##0";
-                
+                totalBolts += bolt.Quantity;
                 currentRow++;
             }
 
-            // Add subtotals
-            var subtotalRow = currentRow;
-            worksheet.Cell(subtotalRow, 1).Value = "TOPLAM";
-            worksheet.Cell(subtotalRow, 4).FormulaA1 = $"=SUM(D4:D{currentRow-1})";
+            // Add single total row
+            worksheet.Cell(currentRow, 1).Value = "TOPLAM";
+            worksheet.Cell(currentRow, 4).Value = totalBolts;
             
-            worksheet.Range($"A{subtotalRow}:D{subtotalRow}").Style
+            worksheet.Range($"A{currentRow}:D{currentRow}").Style
                 .Font.SetBold(true)
                 .Fill.SetBackgroundColor(XLColor.LightGray)
                 .Border.SetOutsideBorder(XLBorderStyleValues.Thin);
@@ -1424,15 +1301,44 @@ namespace TeklaMaterialList
                 progressBar1.Value = 0;
                 progressBar1.Visible = true;
 
-                var profiles = gridProfiles.DataSource as List<dynamic>;
-                var plates = gridPlates.DataSource as List<dynamic>;
-                var bolts = gridBolts.DataSource as List<BoltItem>;
+                // Create a new list of MaterialItem objects
+                var materials = new List<MaterialItem>();
+                
+                // Convert profiles to MaterialItems
+                var profiles = gridProfiles.DataSource as IEnumerable<dynamic>;
+                if (profiles != null)
+                {
+                    foreach (var p in profiles)
+                    {
+                        materials.Add(new MaterialItem
+                        {
+                            Profile = p.Profile,
+                            TotalLength = p.Length * 1000, // Convert back to mm
+                            Material = "ALL" // We don't need material for export
+                        });
+                    }
+                }
 
-                ExportToExcel(profiles.Cast<MaterialItem>().ToList());
+                // Convert plates to MaterialItems
+                var plates = gridPlates.DataSource as IEnumerable<dynamic>;
+                if (plates != null)
+                {
+                    foreach (var p in plates)
+                    {
+                        materials.Add(new MaterialItem
+                        {
+                            Profile = p.Profile,
+                            TotalLength = (p.TotalWeight * 1000.0) / _weightCache[p.Profile], // Calculate length from weight
+                            Material = "ALL"
+                        });
+                    }
+                }
+
+                ExportToExcel(materials);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Export error: {ex.Message}");
+                MessageBox.Show($"Export error: {ex.Message}\n{ex.StackTrace}");
             }
             finally
             {
