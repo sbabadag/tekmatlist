@@ -19,9 +19,12 @@ namespace TeklaMaterialList
         private bool _disposed = false;
         private const string TEMPLATE_FILE = "TEKİRDAG MALZEME LİSTESİ.xlsx";
         private const double STANDARD_LENGTH = 12.0; // Standard profile length in meters
+        private const double ROD_STANDARD_LENGTH = 1.0; // Standard rod length in meters
         private Dictionary<string, double> _weightCache; // Add weight cache
         private HashSet<double> _allBoltLengths = new HashSet<double>(); // Add this field
         private CheckBox chkSelectedOnly; // Add this field
+        private DataGridView gridNuts; // Add this field
+        private TabControl tabControl1;
 
         // Add steel grades list
         private readonly HashSet<string> STEEL_GRADES = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -60,6 +63,7 @@ namespace TeklaMaterialList
         public MainForm()
         {
             InitializeComponent();
+            InitializeCustomComponents(); // Add this line
             SetupGridColumns();
             AddSelectionCheckbox();
             ConnectToTekla();
@@ -76,10 +80,16 @@ namespace TeklaMaterialList
             this.Controls.Add(chkSelectedOnly);
         }
 
+        private void InitializeNutsGrid()
+        {
+            // Remove TabControl/Tab creation code since it's now in InitializeComponent
+            this.gridNuts.Paint += Grid_Paint;
+        }
+
         private void SetupGridColumns()
         {
             // Configure grids
-            foreach (DataGridView grid in new[] { gridProfiles, gridPlates, gridBolts })
+            foreach (DataGridView grid in new[] { gridProfiles, gridPlates, gridBolts, gridNuts })
             {
                 grid.AllowUserToAddRows = false;
                 grid.ReadOnly = true;
@@ -237,6 +247,27 @@ namespace TeklaMaterialList
                     Width = 80
                 }
             });
+
+            // Configure Nuts grid
+            gridNuts.AutoGenerateColumns = false;
+            gridNuts.Columns.AddRange(new DataGridViewColumn[]
+            {
+                new DataGridViewTextBoxColumn 
+                { 
+                    Name = "Size", 
+                    DataPropertyName = "Size",
+                    HeaderText = "Somun Ölçüsü",
+                    Width = 120
+                },
+                new DataGridViewTextBoxColumn 
+                { 
+                    Name = "Quantity",
+                    DataPropertyName = "Quantity", 
+                    HeaderText = "Adet",
+                    DefaultCellStyle = { Format = "N0" },
+                    Width = 100
+                }
+            });
         }
 
         private void Grid_Paint(object sender, PaintEventArgs e)
@@ -366,9 +397,21 @@ namespace TeklaMaterialList
                     
                     if (materialList.Any())
                     {
-                        // Split and populate grids
-                        var plates = materialList.Where(m => m.Profile.StartsWith("PL"))
-                            .OrderBy(m => m.Profile)
+                        // Process all materials in a single pass with efficient grouping
+                        var groupedMaterials = materialList
+                            .AsParallel() // Use parallel processing for large lists
+                            .GroupBy(m => 
+                            {
+                                if (m.Profile.StartsWith("PL", StringComparison.OrdinalIgnoreCase))
+                                    return "Plates";
+                                if (m.Profile.StartsWith("D", StringComparison.OrdinalIgnoreCase))
+                                    return "Rods";
+                                return "Profiles";
+                            })
+                            .ToDictionary(g => g.Key, g => g.ToList());
+
+                        // Process each category
+                        var plates = (groupedMaterials.ContainsKey("Plates") ? groupedMaterials["Plates"] : new List<MaterialItem>())
                             .Select(m => new
                             {
                                 Profile = m.Profile,
@@ -386,34 +429,29 @@ namespace TeklaMaterialList
                             })
                             .ToList();
 
-                        var profiles = materialList.Where(m => !m.Profile.StartsWith("PL"))
-                            .Select(m => new
-                            {
-                                Profile = m.Profile,
-                                ActualWeight = Math.Round(_weightCache[m.Profile] * (m.TotalLength / 1000.0), 0),
-                                Length = Math.Ceiling(m.TotalLength / 1000),
-                                StandardLength = STANDARD_LENGTH,
-                                Count = Math.Ceiling(Math.Ceiling(m.TotalLength / 1000) / STANDARD_LENGTH),
-                                Weight = Math.Round(_weightCache[m.Profile], 2),
-                                TotalWeight = Math.Round(
-                                    Math.Ceiling(Math.Ceiling(m.TotalLength / 1000) / STANDARD_LENGTH) * // Count
-                                    STANDARD_LENGTH * // Standard Length
-                                    _weightCache[m.Profile], // Unit Weight
-                                    0)
-                            })
+                        var profiles = (groupedMaterials.ContainsKey("Profiles") ? groupedMaterials["Profiles"] : new List<MaterialItem>())
+                            .Select(m => CreateProfileData(m))
                             .ToList();
 
+                        var rods = (groupedMaterials.ContainsKey("Rods") ? groupedMaterials["Rods"] : new List<MaterialItem>())
+                            .Select(m => CreateProfileData(m))
+                            .ToList();
+
+                        // Update data sources all at once
+                        gridPlates.DataSource = null;
+                        gridProfiles.DataSource = null;
+                        gridRods.DataSource = null;
+                        
                         gridPlates.DataSource = plates;
                         gridProfiles.DataSource = profiles;
+                        gridRods.DataSource = rods;
 
                         UpdateProgress(90, "Getting bolt list...");
                         var bolts = GetBoltList();
                         gridBolts.DataSource = bolts;
 
                         btnExport.Enabled = true;
-
-                        // Update totals
-                        UpdateTotals(profiles, plates, bolts);
+                        UpdateTotals(profiles, plates, rods, bolts);
                     }
                     else
                     {
@@ -741,6 +779,10 @@ namespace TeklaMaterialList
                         UpdateProgress(95, "Exporting bolts...");
                         ExportBoltsToWorksheet(workbook, "Bulonlar", bolts);
 
+                        UpdateProgress(90, "Exporting nuts...");
+                        var nuts = gridNuts.DataSource as List<NutItem>;
+                        ExportNutsToWorksheet(workbook, "Somunlar", nuts);
+
                         UpdateProgress(95, "Saving Excel file...");
                         workbook.SaveAs(filePath);
                         MessageBox.Show("Malzeme listesi başarıyla oluşturuldu!");
@@ -1037,6 +1079,12 @@ namespace TeklaMaterialList
             public string Assembly { get; set; }
         }
 
+        private class NutItem
+        {
+            public int Size { get; set; }
+            public int Quantity { get; set; }
+        }
+
         private string GetBoltKey(string standard, string size, double length, string assembly)
         {
             // Find the next available longer bolt length that's within 5mm
@@ -1055,6 +1103,7 @@ namespace TeklaMaterialList
         private List<BoltItem> GetBoltList()
         {
             var boltGroups = new Dictionary<string, BoltItem>();
+            var nutGroups = new Dictionary<int, int>(); // Size -> Quantity
             var debugInfo = new List<string>();
             _allBoltLengths.Clear();
             
@@ -1112,7 +1161,18 @@ namespace TeklaMaterialList
 
                 while (allObjects.MoveNext())
                 {
-                    if (allObjects.Current is BoltGroup boltGroup)
+                    if (allObjects.Current is Part part && 
+                        part.Profile.ProfileString.StartsWith("PD", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var nutSize = ParseNutSize(part.Profile.ProfileString);
+                        if (nutSize > 0)
+                        {
+                            if (!nutGroups.ContainsKey(nutSize))
+                                nutGroups[nutSize] = 0;
+                            nutGroups[nutSize]++;
+                        }
+                    }
+                    else if (allObjects.Current is BoltGroup boltGroup)
                     {
                         try
                         {
@@ -1186,6 +1246,12 @@ namespace TeklaMaterialList
                         "Bolt Grouping Debug"
                     );
                 }
+
+                // Convert nuts to list and assign to grid
+                gridNuts.DataSource = nutGroups
+                    .Select(n => new NutItem { Size = n.Key, Quantity = n.Value })
+                    .OrderBy(n => n.Size)
+                    .ToList();
 
                 return boltGroups.Values
                     .OrderBy(b => b.StandardName)
@@ -1285,6 +1351,57 @@ namespace TeklaMaterialList
             }
         }
 
+        private void ExportNutsToWorksheet(XLWorkbook workbook, string sheetName, List<NutItem> nuts)
+        {
+            var worksheet = workbook.Worksheets.Add(sheetName);
+            
+            worksheet.PageSetup.PaperSize = XLPaperSize.A4Paper;
+            worksheet.PageSetup.FitToPages(1, 1);
+            worksheet.PageSetup.PageOrientation = XLPageOrientation.Portrait;
+            worksheet.PageSetup.ShowGridlines = true;
+            
+            worksheet.Cell("A1").Value = "SOMUN LİSTESİ";
+            worksheet.Range("A1:B1").Merge();
+            worksheet.Cell("A1").Style
+                .Font.SetBold(true)
+                .Font.SetFontSize(14)
+                .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+
+            var headers = new[] { "Ölçü", "Adet" };
+            for (int i = 0; i < headers.Length; i++)
+            {
+                var cell = worksheet.Cell(3, i + 1);
+                cell.Value = headers[i];
+                cell.Style
+                    .Font.SetBold(true)
+                    .Fill.SetBackgroundColor(XLColor.LightGray)
+                    .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+                    .Border.SetOutsideBorder(XLBorderStyleValues.Thin);
+            }
+
+            int currentRow = 4;
+            int totalNuts = 0;
+            foreach (var nut in nuts)
+            {
+                worksheet.Cell(currentRow, 1).Value = $"M{nut.Size}";
+                worksheet.Cell(currentRow, 2).Value = nut.Quantity;
+                totalNuts += nut.Quantity;
+                currentRow++;
+            }
+
+            worksheet.Cell(currentRow, 1).Value = "TOPLAM";
+            worksheet.Cell(currentRow, 2).Value = totalNuts;
+            
+            worksheet.Range($"A{currentRow}:B{currentRow}").Style
+                .Font.SetBold(true)
+                .Fill.SetBackgroundColor(XLColor.LightGray)
+                .Border.SetOutsideBorder(XLBorderStyleValues.Thin);
+
+            var usedRange = worksheet.Range(worksheet.FirstCellUsed(), worksheet.LastCellUsed());
+            usedRange.Style.Border.SetOutsideBorder(XLBorderStyleValues.Medium);
+            usedRange.Style.Border.SetInsideBorder(XLBorderStyleValues.Thin);
+        }
+
         private void btnExport_Click(object sender, EventArgs e)
         {
             if (gridProfiles.DataSource == null || 
@@ -1347,7 +1464,7 @@ namespace TeklaMaterialList
             }
         }
 
-        private void UpdateTotals(dynamic profiles, dynamic plates, List<BoltItem> bolts)
+        private void UpdateTotals(dynamic profiles, dynamic plates, dynamic rods, List<BoltItem> bolts)
         {
             try
             {
@@ -1369,21 +1486,78 @@ namespace TeklaMaterialList
                     totalPlateCount += (int)plate.Count;
                 }
 
+                // Calculate rod totals
+                double totalRodWeight = 0;
+                int totalRodCount = 0;
+                foreach (var rod in rods)
+                {
+                    totalRodWeight += (double)rod.TotalWeight;
+                    totalRodCount += (int)rod.Count;
+                }
+
                 // Calculate bolt totals
                 int totalBoltCount = bolts.Sum(b => b.Quantity);
+
+                // Add nut totals
+                var nuts = gridNuts.DataSource as List<NutItem>;
+                int totalNutCount = nuts?.Sum(n => n.Quantity) ?? 0;
 
                 // Update labels with proper formatting
                 lblTotalProfiles.Text = string.Format("Profil: {0} adet, {1:N0} kg", 
                     totalProfileCount, totalProfileWeight);
                 lblTotalPlates.Text = string.Format("Levha: {0} adet, {1:N0} kg", 
                     totalPlateCount, totalPlateWeight);
-                lblTotalBolts.Text = string.Format("Bulon: {0} adet", 
-                    totalBoltCount);
+                lblTotalRods.Text = string.Format("Çubuk: {0} adet, {1:N0} kg", 
+                    totalRodCount, totalRodWeight);
+                lblTotalBolts.Text = string.Format("Bulon: {0} adet, Somun: {1} adet", 
+                    totalBoltCount, totalNutCount);
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Error updating totals: {ex.Message}");
             }
+        }
+
+        private dynamic CreateProfileData(MaterialItem m)
+        {
+            var totalLengthInMeters = Math.Ceiling(m.TotalLength / 1000);
+            // Use different standard length for rods (D profiles)
+            var standardLength = m.Profile.StartsWith("D", StringComparison.OrdinalIgnoreCase) 
+                ? ROD_STANDARD_LENGTH 
+                : STANDARD_LENGTH;
+            
+            var standardPiecesCount = (int)Math.Ceiling(totalLengthInMeters / standardLength);
+            var unitWeight = _weightCache[m.Profile];
+            
+            return new
+            {
+                Profile = m.Profile,
+                ActualWeight = Math.Round(unitWeight * (m.TotalLength / 1000.0), 0),
+                Length = totalLengthInMeters,
+                StandardLength = standardLength,
+                Count = standardPiecesCount,
+                Weight = Math.Round(unitWeight, 2),
+                TotalWeight = Math.Round(
+                    standardPiecesCount * standardLength * unitWeight,
+                    0)
+            };
+        }
+
+        private int ParseNutSize(string pdProfile)
+        {
+            try
+            {
+                // Format is PD(A)*(B) where nut size = A - 2*B
+                var parts = pdProfile.Substring(2).Split('*');
+                if (parts.Length == 2)
+                {
+                    var a = int.Parse(parts[0].Trim('(', ')'));
+                    var b = int.Parse(parts[1]);
+                    return a - (2 * b);
+                }
+            }
+            catch { }
+            return 0;
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -1415,6 +1589,71 @@ namespace TeklaMaterialList
                 _disposed = true;
             }
             base.Dispose(disposing);
+        }
+
+        private void InitializeCustomComponents()
+        {
+            // Create tabs
+            var profilesTab = new TabPage("Profiller");
+            var platesTab = new TabPage("Levhalar");
+            var rodsTab = new TabPage("Çubuklar");
+            var boltsTab = new TabPage("Bulonlar");
+            var nutsTab = new TabPage("Somunlar");
+
+            // Setup TabControl
+            this.tabControl1 = new TabControl
+            {
+                Dock = DockStyle.Fill,
+                Location = new System.Drawing.Point(0, 0), // Use fully qualified name
+                Name = "tabControl1",
+                SelectedIndex = 0,
+                Size = new System.Drawing.Size(800, 450), // Use fully qualified name
+                TabIndex = 0
+            };
+
+            // Add tabs
+            this.tabControl1.TabPages.AddRange(new[] {
+                profilesTab,
+                platesTab,
+                rodsTab,
+                boltsTab,
+                nutsTab
+            });
+
+            // Initialize grids
+            this.gridProfiles = new DataGridView();
+            this.gridPlates = new DataGridView();
+            this.gridRods = new DataGridView();
+            this.gridBolts = new DataGridView();
+            this.gridNuts = new DataGridView();
+
+            // Configure grid properties and add to tabs
+            foreach (var pair in new[] { 
+                (gridProfiles, profilesTab),
+                (gridPlates, platesTab),
+                (gridRods, rodsTab),
+                (gridBolts, boltsTab),
+                (gridNuts, nutsTab)
+            })
+            {
+                var grid = pair.Item1;
+                var tab = pair.Item2;
+                
+                grid.Dock = DockStyle.Fill;
+                grid.AllowUserToAddRows = false;
+                grid.ReadOnly = true;
+                grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+                grid.ScrollBars = ScrollBars.Both;
+                grid.RowTemplate.Height = 25;
+                grid.RowHeadersVisible = true;
+                grid.RowHeadersWidth = 45;
+                
+                tab.Controls.Add(grid);
+            }
+
+            // Add TabControl to form
+            this.Controls.Add(this.tabControl1);
         }
     }
 }

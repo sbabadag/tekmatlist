@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("TeklaMaterialList")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+fc9302732f469eba82c37a592864500a2ca2442d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+11e0aeadbd331a357de7eed57422415c07c2e455")]
 [assembly: System.Reflection.AssemblyProductAttribute("TeklaMaterialList")]
 [assembly: System.Reflection.AssemblyTitleAttribute("TeklaMaterialList")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

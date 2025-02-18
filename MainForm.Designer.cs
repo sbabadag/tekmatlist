@@ -7,9 +7,11 @@ namespace TeklaMaterialList
         private System.Windows.Forms.TabPage tabProfiles;
         private System.Windows.Forms.TabPage tabPlates;
         private System.Windows.Forms.TabPage tabBolts;
+        private System.Windows.Forms.TabPage tabRods;
         private System.Windows.Forms.DataGridView gridProfiles;
         private System.Windows.Forms.DataGridView gridPlates;
         private System.Windows.Forms.DataGridView gridBolts;
+        private System.Windows.Forms.DataGridView gridRods;
         private System.Windows.Forms.Button btnCalculate;
         private System.Windows.Forms.Button btnExport;
         private System.Windows.Forms.ProgressBar progressBar1;
@@ -17,6 +19,7 @@ namespace TeklaMaterialList
         private System.Windows.Forms.Label lblTotalProfiles;
         private System.Windows.Forms.Label lblTotalPlates;
         private System.Windows.Forms.Label lblTotalBolts;
+        private System.Windows.Forms.Label lblTotalRods;
 
         private void InitializeComponent()
         {
@@ -24,9 +27,11 @@ namespace TeklaMaterialList
             this.tabProfiles = new System.Windows.Forms.TabPage();
             this.tabPlates = new System.Windows.Forms.TabPage();
             this.tabBolts = new System.Windows.Forms.TabPage();
+            this.tabRods = new System.Windows.Forms.TabPage();
             this.gridProfiles = new System.Windows.Forms.DataGridView();
             this.gridPlates = new System.Windows.Forms.DataGridView();
             this.gridBolts = new System.Windows.Forms.DataGridView();
+            this.gridRods = new System.Windows.Forms.DataGridView();
             this.btnCalculate = new System.Windows.Forms.Button();
             this.btnExport = new System.Windows.Forms.Button();
             this.progressBar1 = new System.Windows.Forms.ProgressBar();
@@ -34,6 +39,7 @@ namespace TeklaMaterialList
             this.lblTotalProfiles = new System.Windows.Forms.Label();
             this.lblTotalPlates = new System.Windows.Forms.Label();
             this.lblTotalBolts = new System.Windows.Forms.Label();
+            this.lblTotalRods = new System.Windows.Forms.Label();
 
             // Configure form
             this.Text = "Material List";
@@ -41,15 +47,16 @@ namespace TeklaMaterialList
 
             // Configure tab control
             this.tabControl.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.tabControl.Controls.AddRange(new System.Windows.Forms.Control[] { tabProfiles, tabPlates, tabBolts });
+            this.tabControl.Controls.AddRange(new System.Windows.Forms.Control[] { tabProfiles, tabPlates, tabBolts, tabRods });
 
             // Configure tabs
             this.tabProfiles.Text = "Profiles";
             this.tabPlates.Text = "Plates";
             this.tabBolts.Text = "Bolts";
+            this.tabRods.Text = "Çubuklar";
 
             // Configure grids
-            foreach (System.Windows.Forms.DataGridView grid in new[] { gridProfiles, gridPlates, gridBolts })
+            foreach (System.Windows.Forms.DataGridView grid in new[] { gridProfiles, gridPlates, gridBolts, gridRods })
             {
                 grid.Dock = System.Windows.Forms.DockStyle.Fill;
                 grid.AllowUserToAddRows = false;
@@ -62,6 +69,7 @@ namespace TeklaMaterialList
             this.tabProfiles.Controls.Add(gridProfiles);
             this.tabPlates.Controls.Add(gridPlates);
             this.tabBolts.Controls.Add(gridBolts);
+            this.tabRods.Controls.Add(gridRods);
 
             // Configure buttons panel
             var buttonPanel = new System.Windows.Forms.Panel
@@ -100,14 +108,16 @@ namespace TeklaMaterialList
             this.lblTotalProfiles.Width = labelWidth;
             this.lblTotalPlates.Width = labelWidth;
             this.lblTotalBolts.Width = labelWidth;
+            this.lblTotalRods.Width = labelWidth;
 
             this.lblTotalProfiles.Location = new System.Drawing.Point(10, 5);
             this.lblTotalPlates.Location = new System.Drawing.Point(labelWidth + 20, 5);
             this.lblTotalBolts.Location = new System.Drawing.Point(2 * labelWidth + 30, 5);
+            this.lblTotalRods.Location = new System.Drawing.Point(3 * labelWidth + 40, 5);
 
             // Add labels to panel
             this.totalsPanel.Controls.AddRange(new System.Windows.Forms.Control[] { 
-                lblTotalProfiles, lblTotalPlates, lblTotalBolts 
+                lblTotalProfiles, lblTotalPlates, lblTotalBolts, lblTotalRods 
             });
 
             // Add panel to form
