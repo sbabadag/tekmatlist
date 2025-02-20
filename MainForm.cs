@@ -23,8 +23,22 @@ namespace TeklaMaterialList
         private Dictionary<string, double> _weightCache; // Add weight cache
         private HashSet<double> _allBoltLengths = new HashSet<double>(); // Add this field
         private CheckBox chkSelectedOnly; // Add this field
-        private DataGridView gridNuts; // Add this field
+
+        // Form controls
         private TabControl tabControl1;
+        private TabPage tabProfiles;
+        private TabPage tabPlates;
+        private TabPage tabBolts;
+        private TabPage tabRods;
+        private TabPage tabNuts;
+        private DataGridView gridProfiles;
+        private DataGridView gridPlates;
+        private DataGridView gridBolts;
+        private DataGridView gridRods;
+        private DataGridView gridNuts;
+        private Button btnCalculate;
+        private Button btnExport;
+        private ProgressBar progressBar1;
 
         // Add steel grades list
         private readonly HashSet<string> STEEL_GRADES = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -63,7 +77,6 @@ namespace TeklaMaterialList
         public MainForm()
         {
             InitializeComponent();
-            InitializeCustomComponents(); // Add this line
             SetupGridColumns();
             AddSelectionCheckbox();
             ConnectToTekla();
@@ -1589,71 +1602,6 @@ namespace TeklaMaterialList
                 _disposed = true;
             }
             base.Dispose(disposing);
-        }
-
-        private void InitializeCustomComponents()
-        {
-            // Create tabs
-            var profilesTab = new TabPage("Profiller");
-            var platesTab = new TabPage("Levhalar");
-            var rodsTab = new TabPage("Çubuklar");
-            var boltsTab = new TabPage("Bulonlar");
-            var nutsTab = new TabPage("Somunlar");
-
-            // Setup TabControl
-            this.tabControl1 = new TabControl
-            {
-                Dock = DockStyle.Fill,
-                Location = new System.Drawing.Point(0, 0), // Use fully qualified name
-                Name = "tabControl1",
-                SelectedIndex = 0,
-                Size = new System.Drawing.Size(800, 450), // Use fully qualified name
-                TabIndex = 0
-            };
-
-            // Add tabs
-            this.tabControl1.TabPages.AddRange(new[] {
-                profilesTab,
-                platesTab,
-                rodsTab,
-                boltsTab,
-                nutsTab
-            });
-
-            // Initialize grids
-            this.gridProfiles = new DataGridView();
-            this.gridPlates = new DataGridView();
-            this.gridRods = new DataGridView();
-            this.gridBolts = new DataGridView();
-            this.gridNuts = new DataGridView();
-
-            // Configure grid properties and add to tabs
-            foreach (var pair in new[] { 
-                (gridProfiles, profilesTab),
-                (gridPlates, platesTab),
-                (gridRods, rodsTab),
-                (gridBolts, boltsTab),
-                (gridNuts, nutsTab)
-            })
-            {
-                var grid = pair.Item1;
-                var tab = pair.Item2;
-                
-                grid.Dock = DockStyle.Fill;
-                grid.AllowUserToAddRows = false;
-                grid.ReadOnly = true;
-                grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-                grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-                grid.ScrollBars = ScrollBars.Both;
-                grid.RowTemplate.Height = 25;
-                grid.RowHeadersVisible = true;
-                grid.RowHeadersWidth = 45;
-                
-                tab.Controls.Add(grid);
-            }
-
-            // Add TabControl to form
-            this.Controls.Add(this.tabControl1);
         }
     }
 }
