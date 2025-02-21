@@ -1,5 +1,7 @@
 namespace TeklaMaterialList
 {
+    using System.Linq; // Add this at the top
+
     partial class MainForm
     {
         private System.ComponentModel.IContainer components = null;
@@ -12,6 +14,19 @@ namespace TeklaMaterialList
         private void InitializeComponent()
         {
             this.components = new System.ComponentModel.Container();
+
+            // Create standard length combo box first
+            this.cmbStandardLength = new System.Windows.Forms.ComboBox();
+            this.cmbStandardLength.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbStandardLength.Size = new System.Drawing.Size(80, 23);
+            this.cmbStandardLength.Items.AddRange(new object[] { "6 mt", "12 mt" });
+            this.cmbStandardLength.SelectedIndex = 1; // Default to 12m
+            this.cmbStandardLength.SelectedIndexChanged += new System.EventHandler(CmbStandardLength_SelectedIndexChanged);
+
+            // Add the label for standard length
+            var lblStandardLength = new System.Windows.Forms.Label();
+            lblStandardLength.Text = "Standard Length:";
+            lblStandardLength.AutoSize = true;
 
             // Create and initialize grids
             this.gridProfiles = new System.Windows.Forms.DataGridView();
@@ -118,14 +133,37 @@ namespace TeklaMaterialList
                 this.progressBar1 
             });
 
-            // Add controls to form
+            // Set positions based on button panel
+            this.cmbStandardLength.Location = new System.Drawing.Point(this.btnCalculate.Left - 250, this.btnCalculate.Top + 3);
+            lblStandardLength.Location = new System.Drawing.Point(this.cmbStandardLength.Left - 95, this.cmbStandardLength.Top + 3);
+
+            // Add controls to form in correct order
             this.Controls.AddRange(new System.Windows.Forms.Control[] {
                 this.tabControl1,
                 buttonPanel,
-                this.totalsPanel
+                this.totalsPanel,
+                this.cmbStandardLength,
+                lblStandardLength
             });
 
             this.ResumeLayout(false);
+        }
+
+        private void CmbStandardLength_SelectedIndexChanged(object sender, System.EventArgs e)
+        {
+            currentStandardLength = cmbStandardLength.SelectedIndex == 0 ? 6.0 : 12.0;
+            
+            if (gridProfiles.DataSource != null)
+            {
+                // Recalculate profiles with new standard length
+                var profiles = gridProfiles.DataSource as System.Collections.Generic.IEnumerable<dynamic>;
+                if (profiles != null)
+                {
+                    var recalculatedProfiles = profiles.Select(p => RecalculateProfile(p)).ToList();
+                    gridProfiles.DataSource = recalculatedProfiles;
+                    UpdateTotals(recalculatedProfiles, gridPlates.DataSource, gridRods.DataSource, gridBolts.DataSource as System.Collections.Generic.List<BoltItem>);
+                }
+            }
         }
     }
 }

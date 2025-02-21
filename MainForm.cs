@@ -23,6 +23,8 @@ namespace TeklaMaterialList
         private Dictionary<string, double> _weightCache; // Add weight cache
         private HashSet<double> _allBoltLengths = new HashSet<double>(); // Add this field
         private CheckBox chkSelectedOnly; // Add this field
+        private ComboBox cmbStandardLength;
+        private double currentStandardLength = 12.0;
 
         // Form controls
         private TabControl tabControl1;
@@ -988,8 +990,8 @@ namespace TeklaMaterialList
                     var material = materials[i];
 
                     var totalLengthInMeters = Math.Ceiling(material.TotalLength / 1000);
-                    var standardPiecesCount = (int)Math.Ceiling(totalLengthInMeters / STANDARD_LENGTH);
-                    var calculatedTotalLength = standardPiecesCount * STANDARD_LENGTH;
+                    var standardPiecesCount = (int)Math.Ceiling(totalLengthInMeters / currentStandardLength);
+                    var calculatedTotalLength = standardPiecesCount * currentStandardLength;
                     var unitWeight = _weightCache[material.Profile];
                     var profileTotalWeight = unitWeight * calculatedTotalLength;
 
@@ -1001,7 +1003,7 @@ namespace TeklaMaterialList
                     // Export values
                     worksheet.Cell(row, 1).Value = material.Profile;
                     worksheet.Cell(row, 2).Value = totalLengthInMeters;
-                    worksheet.Cell(row, 3).Value = STANDARD_LENGTH;
+                    worksheet.Cell(row, 3).Value = currentStandardLength;
                     worksheet.Cell(row, 4).Value = standardPiecesCount;
                     worksheet.Cell(row, 5).Value = calculatedTotalLength;
                     worksheet.Cell(row, 6).Value = Math.Round(unitWeight, 2);
@@ -1537,7 +1539,7 @@ namespace TeklaMaterialList
             // Use different standard length for rods (D profiles)
             var standardLength = m.Profile.StartsWith("D", StringComparison.OrdinalIgnoreCase) 
                 ? ROD_STANDARD_LENGTH 
-                : STANDARD_LENGTH;
+                : currentStandardLength; // Use selected length instead of STANDARD_LENGTH
             
             var standardPiecesCount = (int)Math.Ceiling(totalLengthInMeters / standardLength);
             var unitWeight = _weightCache[m.Profile];
@@ -1571,6 +1573,25 @@ namespace TeklaMaterialList
             }
             catch { }
             return 0;
+        }
+
+        private dynamic RecalculateProfile(dynamic profile)
+        {
+            var totalLengthInMeters = (double)profile.Length;
+            var standardPiecesCount = (int)Math.Ceiling(totalLengthInMeters / currentStandardLength);
+            var calculatedTotalLength = standardPiecesCount * currentStandardLength;
+            var unitWeight = (double)profile.Weight;
+            
+            return new
+            {
+                Profile = profile.Profile,
+                ActualWeight = profile.ActualWeight,
+                Length = totalLengthInMeters,
+                StandardLength = currentStandardLength,
+                Count = standardPiecesCount,
+                Weight = unitWeight,
+                TotalWeight = Math.Round(standardPiecesCount * currentStandardLength * unitWeight, 0)
+            };
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
